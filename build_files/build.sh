@@ -124,26 +124,26 @@ chmod 644 /etc/profile.d/brew.sh
 # files the client pulls with ostree-unverified-registry: and skips checking.
 #
 # After this image is deployed, switch to the signed scheme once with:
-#   sudo bootc switch ostree-image-signed:docker://ghcr.io/nativetexan70/bazzite-freeipa:latest
+#   sudo bootc switch ostree-image-signed:docker://ghcr.io/personalcyber/bazzite-freeipa:latest
 # Subsequent upgrades will then enforce signature verification automatically.
 
 install -d -m 0755 /etc/pki/containers
 install -m 0644 /ctx/cosign.pub \
-    /etc/pki/containers/ghcr.io-nativetexan70-bazzite-freeipa.pub
+    /etc/pki/containers/ghcr.io-personalcyber-bazzite-freeipa.pub
 
 install -d -m 0755 /etc/containers/registries.d
-cat > /etc/containers/registries.d/ghcr.io-nativetexan70-bazzite-freeipa.yaml << 'EOF'
+cat > /etc/containers/registries.d/ghcr.io-personalcyber-bazzite-freeipa.yaml << 'EOF'
 docker:
-  ghcr.io/nativetexan70/bazzite-freeipa:
+  ghcr.io/personalcyber/bazzite-freeipa:
     use-sigstore-attachments: true
 EOF
 
 # Patch the existing policy.json (inherited from the base image) rather than
 # replacing it, to preserve verification rules for the base image itself.
-jq '.transports.docker["ghcr.io/nativetexan70/bazzite-freeipa"] = [
+jq '.transports.docker["ghcr.io/personalcyber/bazzite-freeipa"] = [
   {
     "type": "sigstoreSigned",
-    "keyPath": "/etc/pki/containers/ghcr.io-nativetexan70-bazzite-freeipa.pub",
+    "keyPath": "/etc/pki/containers/ghcr.io-personalcyber-bazzite-freeipa.pub",
     "signedIdentity": {"type": "matchRepository"}
   }
 ]' /etc/containers/policy.json > /tmp/policy.json.new

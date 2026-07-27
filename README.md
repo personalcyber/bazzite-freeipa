@@ -2,7 +2,7 @@
 
 A custom [bootc](https://github.com/bootc-dev/bootc) image layered on [Bazzite](https://github.com/ublue-os/bazzite) (Universal Blue) that ships `freeipa-client` and all required dependencies pre-installed. The image is built and published automatically to GHCR via GitHub Actions and is designed to preserve an existing FreeIPA domain join across `bootc` updates.
 
-Published image: `ghcr.io/nativetexan70/bazzite-freeipa:latest`
+Published image: `ghcr.io/personalcyber/bazzite-freeipa:latest`
 
 ---
 
@@ -13,7 +13,7 @@ Published image: `ghcr.io/nativetexan70/bazzite-freeipa:latest`
 If you are already running a bootc-based system (Bazzite, Bluefin, Aurora, etc.), switching requires a single command and a reboot. No reinstall is needed.
 
 ```bash
-sudo bootc switch ghcr.io/nativetexan70/bazzite-freeipa:latest
+sudo bootc switch ghcr.io/personalcyber/bazzite-freeipa:latest
 ```
 
 `bootc switch` stages the new image. The switch takes effect on the next reboot.
@@ -33,7 +33,7 @@ sudo bootc status
 
 ## From a Non-bootc Fedora or RPM-based System
 
-A fresh install using an ISO is the recommended path. Download or build an ISO from this repository (see [Building Disk Images](#building-disk-images)) and boot from it. The installer's post-install script automatically switches the new system to `ghcr.io/nativetexan70/bazzite-freeipa:latest`.
+A fresh install using an ISO is the recommended path. Download or build an ISO from this repository (see [Building Disk Images](#building-disk-images)) and boot from it. The installer's post-install script automatically switches the new system to `ghcr.io/personalcyber/bazzite-freeipa:latest`.
 
 ---
 
@@ -301,12 +301,12 @@ Run `just clean` to remove all build artifacts.
 
 # Building Disk Images via GitHub Actions
 
-The [build-disk.yml](./.github/workflows/build-disk.yml) workflow builds installable disk images (`qcow2`, `anaconda-iso-gnome`, and `anaconda-iso-kde`) from the **published** OCI image at `ghcr.io/nativetexan70/bazzite-freeipa:latest`. Trigger it manually from the **Actions** tab, selecting `amd64` or `arm64`.
+The [build-disk.yml](./.github/workflows/build-disk.yml) workflow builds installable disk images (`qcow2`, `anaconda-iso-gnome`, and `anaconda-iso-kde`) from the **published** OCI image at `ghcr.io/personalcyber/bazzite-freeipa:latest`. Trigger it manually from the **Actions** tab, selecting `amd64` or `arm64`.
 
 > [!NOTE]
 > The GitHub Actions workflow uses the last image pushed to GHCR, not your local build. Push your changes and wait for the `build.yml` workflow to complete before triggering `build-disk.yml`.
 
-The ISO kickstart is pre-configured to switch a newly installed system to `ghcr.io/nativetexan70/bazzite-freeipa:latest` automatically.
+The ISO kickstart is pre-configured to switch a newly installed system to `ghcr.io/personalcyber/bazzite-freeipa:latest` automatically.
 
 To upload disk images to S3, add the following repository secrets under `Settings` → `Secrets and Variables` → `Actions`:
 
@@ -328,7 +328,7 @@ Images pushed to GHCR are signed with [Cosign](https://github.com/sigstore/cosig
 To verify an image locally:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/nativetexan70/bazzite-freeipa:latest
+cosign verify --key cosign.pub ghcr.io/personalcyber/bazzite-freeipa:latest
 ```
 
 > [!WARNING]
