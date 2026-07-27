@@ -32,7 +32,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    /ctx/build.sh
+    bash /ctx/build.sh
 
 # COPY writes directly to the image layer and is not subject to the bind-mount
 # that the OCI runtime places on /etc/hostname during RUN steps. This ships an
