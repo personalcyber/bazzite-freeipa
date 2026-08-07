@@ -45,6 +45,11 @@ install -d -m 0755 /var/log/sssd
 # --enroll-secret so no server address or secret is baked into the image.
 
 dnf5 install -y ruby ruby-devel rubygems rpm-build gcc make redhat-rpm-config
+
+# rubygems expects its user-level download cache directory to already exist
+# and fails every gem fetch with Errno::ENOENT if it doesn't. It isn't
+# created automatically in this container, so create it up front.
+mkdir -p "$(ruby -e 'puts Gem.user_dir')/cache"
 gem install --no-document fpm
 
 _fleet_version="$(curl -fsSL https://api.github.com/repos/fleetdm/fleet/releases/latest |
