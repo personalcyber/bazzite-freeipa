@@ -66,11 +66,22 @@ curl -fsSL \
     "https://github.com/fleetdm/fleet/releases/download/fleet-v${_fleet_version}/fleetctl_v${_fleet_version}_linux_amd64.tar.gz" \
     -o "${_fleet_workdir}/fleetctl.tar.gz"
 tar -xzf "${_fleet_workdir}/fleetctl.tar.gz" -C "${_fleet_workdir}"
-install -m 0755 \
-    "${_fleet_workdir}/fleetctl_v${_fleet_version}_linux_amd64/fleetctl" \
-    /usr/local/bin/fleetctl
+_fleetctl="${_fleet_workdir}/fleetctl_v${_fleet_version}_linux_amd64/fleetctl"
+chmod 0755 "${_fleetctl}"
 
-(cd "${_fleet_workdir}" && fleetctl package --type rpm)
+# fleetctl is invoked directly from ${_fleet_workdir} rather than installed
+# to /usr/local/bin: /usr/local is symlinked into /var on this ostree-based
+# image (see the GEM_HOME note above) and isn't writable during this RUN
+# step.
+(cd "${_fleet_workdir}" && "${_fleetctl}" package --type rpm)
+
+# fleet-osquery installs to /opt/orbit, but /opt is symlinked to /var/opt in
+# this image (see the [IM]MUTABLE /opt note in the Containerfile) and /var
+# isn't populated during this RUN step. Pre-create the real backing
+# directory so dnf5 can write through the symlink — the same workaround
+# used for Homebrew's /var/home/linuxbrew below, and unlike the fleetctl/fpm
+# build tooling above, /opt/orbit's contents are meant to ship in the image.
+mkdir -p /var/opt
 dnf5 install -y "${_fleet_workdir}"/fleet-osquery*.rpm
 
 ### Preserve Fleet enrollment state across bootc updates
@@ -94,9 +105,8 @@ rm -f /etc/default/orbit
 # Bazzite image for akmods/DKMS builds, and `dnf5 remove` cannot distinguish
 # "installed only for this step" from "already required by the base image".
 rm -rf "${GEM_HOME}"
-rm -f /usr/local/bin/fleetctl
 rm -rf "${_fleet_workdir}"
-unset _fleet_version _fleet_workdir GEM_HOME
+unset _fleet_version _fleet_workdir _fleetctl GEM_HOME
 
 ### Enable required system units
 
