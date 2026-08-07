@@ -1,6 +1,6 @@
 # bazzite-freeipa
 
-A custom [bootc](https://github.com/bootc-dev/bootc) image layered on [Bazzite](https://github.com/ublue-os/bazzite) (Universal Blue) that ships `freeipa-client` and all required dependencies pre-installed. The image is built and published automatically to GHCR via GitHub Actions and is designed to preserve an existing FreeIPA domain join across `bootc` updates.
+A custom [bootc](https://github.com/bootc-dev/bootc) image layered on [Bazzite](https://github.com/ublue-os/bazzite) (Universal Blue) that ships `freeipa-client` and the [Fleet](https://fleetdm.com/) osquery agent (`fleetd`/`orbit`) pre-installed. The image is built and published automatically to GHCR via GitHub Actions and is designed to preserve an existing FreeIPA domain join and Fleet enrollment across `bootc` updates.
 
 Published image: `ghcr.io/personalcyber/bazzite-freeipa:latest`
 
@@ -86,6 +86,44 @@ sudo ipa-client-install --uninstall
 
 ---
 
+# Setting Up the Fleet Agent
+
+The Fleet osquery agent (`fleetd`, i.e. `orbit` + `osqueryd`) is pre-installed but ships **unconfigured** — the image is built without a Fleet server URL or enrollment secret baked in, so it never phones home until you point it at your own Fleet instance. See Fleet's [agent configuration docs](https://fleetdm.com/docs/configuration/agent-configuration) for the full set of options.
+
+## Enrolling the Host
+
+Create `/etc/default/orbit` with your Fleet server details:
+
+```bash
+sudo tee /etc/default/orbit > /dev/null <<'EOF'
+ORBIT_FLEET_URL=https://fleet.your.domain.example
+ORBIT_ENROLL_SECRET=your-enroll-secret
+# Or, to keep the secret out of this file, reference a separate file instead:
+# ORBIT_ENROLL_SECRET_PATH=/etc/default/orbit-secret
+EOF
+sudo chmod 0600 /etc/default/orbit
+sudo systemctl restart orbit
+```
+
+`orbit` is already enabled, so it starts enforcing the new configuration as soon as the service restarts (or at next boot).
+
+Verify enrollment:
+
+```bash
+systemctl status orbit
+```
+
+The host should then appear in your Fleet server's UI within a few minutes.
+
+## Leaving Fleet
+
+```bash
+sudo systemctl stop orbit
+sudo rm -f /etc/default/orbit
+```
+
+---
+
 # FreeIPA Join Persistence
 
 This image is specifically designed so that an existing domain join survives `bootc` updates. Here is how it works.
@@ -108,6 +146,14 @@ Runtime state (`/var/lib/sss/`, `/var/log/sssd/`) lives under `/var`, which boot
 
 ---
 
+# Fleet Enrollment Persistence
+
+The same three-way `/etc` merge logic protects Fleet enrollment. `orbit.service` reads its configuration (Fleet server URL, enrollment secret, TLS settings) from `/etc/default/orbit` via an `EnvironmentFile` directive. This image never ships content in that file — the build strips it unconditionally after installing the `fleet-osquery` package — so once you create it locally (see [Setting Up the Fleet Agent](#setting-up-the-fleet-agent)), bootc treats it purely as a local addition and never overwrites it.
+
+**In practice:** after a `bootc update` and reboot, `orbit` comes back up reading the same `/etc/default/orbit` it had before the update, and the host stays enrolled without any intervention.
+
+---
+
 # Changes to the Base Bazzite Image
 
 This image is built on top of `ghcr.io/ublue-os/bazzite-gnome:stable` and makes the following deliberate modifications to support FreeIPA client functionality and ensure join state survives `bootc` updates.
@@ -119,6 +165,7 @@ This image is built on top of `ghcr.io/ublue-os/bazzite-gnome:stable` and makes 
 | `freeipa-client` | Core FreeIPA client tooling (`ipa-client-install`, `ipa` CLI). Also pulls in `sssd`, `krb5-workstation`, `certmonger`, and other required dependencies. |
 | `oddjob` | D-Bus service that allows `sssd` to perform privileged operations (e.g. creating home directories) on behalf of unprivileged processes. |
 | `oddjob-mkhomedir` | PAM module and helper that automatically creates a home directory on first login for domain users. |
+| `fleet-osquery` (`orbit`) | Fleet's osquery agent manager. Built at image-build time via `fleetctl package` (no public dnf/yum repo exists for it) and installed without a Fleet server URL or enrollment secret baked in. |
 
 ## Systemd Units Enabled
 
@@ -127,6 +174,7 @@ This image is built on top of `ghcr.io/ublue-os/bazzite-gnome:stable` and makes 
 | `sssd` | System Security Services Daemon — handles Kerberos authentication, LDAP user/group lookups, and caching for the FreeIPA domain. |
 | `oddjobd` | D-Bus daemon for `oddjob`. Must be running for `pam_oddjob_mkhomedir` to create home directories at login. |
 | `podman.socket` | Inherited from the Bazzite base; retained for rootless container support. |
+| `orbit` | Fleet's agent manager. Enabled unconfigured; it logs connection errors until `/etc/default/orbit` is populated (see [Setting Up the Fleet Agent](#setting-up-the-fleet-agent)), after which it starts enforcing agent configuration with no extra step required. |
 
 ## Homebrew
 
@@ -179,6 +227,12 @@ This image creates the following empty directory skeletons at build time:
 | `/etc/sssd/conf.d/` | `0750` | Drop-in directory for SSSD config fragments. `ipa-client-install` writes `sssd.conf` one level up. |
 
 No config files are shipped inside these directories. Every file written by `ipa-client-install` is a local addition from bootc's perspective and will never be touched by an image update.
+
+## Fleet Agent Packaging
+
+Fleet's `fleetctl package` command (the only supported way to produce an installable `fleetd` package, since there is no public dnf/yum repo) is used at image-build time to build a `fleet-osquery` rpm. This requires `fpm` and its build dependencies (`ruby`, `ruby-devel`, `rubygems`, `rpm-build`, `gcc`, `make`, `redhat-rpm-config`). `fleetctl`, the `fpm` gem, and the `ruby`/`ruby-devel`/`rubygems`/`rpm-build` packages are all removed once the rpm is built and installed — a leftover system Ruby causes the Homebrew install step further down to use it instead of its own vendored Ruby, and Fedora's base `ruby` package is missing the `json` stdlib gem Homebrew needs. `gcc` and `make` are left in place, since unlike Ruby they may already be relied on elsewhere in the base Bazzite image (e.g. akmods/DKMS builds) and blindly removing them is riskier than the modest space they cost.
+
+The package is built without `--fleet-url`/`--enroll-secret`, and `/etc/default/orbit` — the file `orbit.service` reads its configuration from — is deleted unconditionally after installation so this image never ships enrollment details. See [Fleet Enrollment Persistence](#fleet-enrollment-persistence) for why this matters across updates.
 
 ## /var Runtime Directories
 
