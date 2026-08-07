@@ -114,11 +114,7 @@ dnf5 install -y --setopt=tsflags=noscripts "${_fleet_workdir}"/fleet-osquery*.rp
 rm -f /etc/default/orbit
 
 # fleetctl and fpm itself are only needed to produce the package and don't
-# need to ship in the final image. Their dnf dependencies (ruby, gcc, make,
-# rpm-build, etc.) are deliberately left installed rather than removed here:
-# some (gcc, make, kernel headers) may already be relied on by the base
-# Bazzite image for akmods/DKMS builds, and `dnf5 remove` cannot distinguish
-# "installed only for this step" from "already required by the base image".
+# need to ship in the final image.
 rm -rf "${GEM_HOME}"
 rm -rf "${_fleet_workdir}"
 # Drop the query-history file fleetctl wrote to /root/.goquery; /var/roothome
@@ -126,6 +122,17 @@ rm -rf "${_fleet_workdir}"
 # pre-existing /root symlink, not something this build step introduced.
 rm -rf /var/roothome/.goquery
 unset _fleet_version _fleet_workdir _fleetctl GEM_HOME
+
+# ruby/ruby-devel/rubygems/rpm-build are also removed: nothing else in this
+# image legitimately needs a system Ruby, and leaving one in place makes
+# the Homebrew installer below pick it up instead of its own vendored Ruby
+# -- Fedora splits the 'json' stdlib gem out of the base ruby package, so
+# Homebrew's install script fails with a LoadError as soon as it tries to
+# use the system interpreter. gcc/make/redhat-rpm-config are left alone:
+# unlike ruby, they may already be relied on by the base Bazzite image for
+# akmods/DKMS builds, and `dnf5 remove` can't tell "installed only for this
+# step" apart from "already required by the base image".
+dnf5 remove -y ruby ruby-devel rubygems rpm-build || true
 
 ### Enable required system units
 
