@@ -85,11 +85,9 @@ chmod 0755 "${_fleetctl}"
 # fleet-osquery writes orbit's TUF-managed binary tree under /opt/orbit AND
 # a launcher under /usr/local/bin. Both /opt and /usr/local are symlinked
 # into /var in this image (see the [IM]MUTABLE /opt note in the
-# Containerfile) with /var unpopulated during this RUN step. Pre-create
-# both real backing directories so dnf5 can write through the symlinks —
-# the same workaround used for Homebrew's /var/home/linuxbrew below.
-# Unlike the fleetctl/fpm build tooling earlier in this section, these
-# contents are meant to ship in the image.
+# Containerfile), and /var isn't populated during this RUN step, so
+# pre-create both real backing directories just so dnf5 has somewhere to
+# write through the symlinks.
 mkdir -p /var/opt /var/usrlocal
 
 # fpm-generated postinstall scriptlets (%post/%posttrans) call systemctl in
@@ -98,6 +96,48 @@ mkdir -p /var/opt /var/usrlocal
 # above. Skip scriptlets entirely — we enable orbit.service ourselves
 # below regardless of whatever the package's postinstall would have done.
 dnf5 install -y --setopt=tsflags=noscripts "${_fleet_workdir}"/fleet-osquery*.rpm
+
+### Seed orbit's /opt and /usr/local files onto real (non-fresh-install) systems
+#
+# bootc/ostree do NOT carry arbitrary /var content from the container image
+# into a deployed system beyond a genuinely first-ever install, and recent
+# ostree versions dropped even that: /var is machine-local state, meant to
+# be populated via systemd-tmpfiles, not shipped with the image. Since
+# /opt and /usr/local both resolve through /var here, the files fleet-
+# osquery just installed above only exist in this ephemeral build layer --
+# on `bootc switch` (the documented, common path onto this image), rpm's
+# database ends up listing /opt/orbit/... and /usr/local/bin/orbit as
+# installed while the paths themselves are completely empty.
+#
+# Work around this by stashing what was just installed under a plain /usr
+# path (which IS committed normally -- orbit.service loading correctly
+# from /usr/lib/systemd/system proves that), then shipping a tmpfiles.d
+# snippet that copies it into place through the symlinks on first boot.
+# The 'C' tmpfiles directive only acts if its destination doesn't already
+# exist, so this never clobbers orbit's own self-updated binaries later.
+mkdir -p /usr/lib/fleetd-seed
+cp -a /opt/orbit /usr/lib/fleetd-seed/opt-orbit
+cp -a /usr/local/bin/orbit /usr/lib/fleetd-seed/usrlocal-bin-orbit
+
+install -d -m 0755 /usr/lib/tmpfiles.d
+cat > /usr/lib/tmpfiles.d/fleetd-seed.conf << 'EOF'
+# Populate /opt/orbit and /usr/local/bin/orbit (both resolving into /var)
+# from the image-committed seed the first time they're missing. See the
+# Fleet agent section of build.sh for why this exists.
+C /opt/orbit - - - - /usr/lib/fleetd-seed/opt-orbit
+C /usr/local/bin/orbit - - - - /usr/lib/fleetd-seed/usrlocal-bin-orbit
+EOF
+
+# Make sure orbit.service doesn't race the tmpfiles seeding above. This is
+# almost certainly already guaranteed by systemd's default ordering (both
+# sysinit.target, which pulls in systemd-tmpfiles-setup.service, and
+# orbit.service's own multi-user.target dependency chain go through
+# basic.target), but it's cheap to make explicit.
+install -d -m 0755 /usr/lib/systemd/system/orbit.service.d
+cat > /usr/lib/systemd/system/orbit.service.d/10-wait-for-seed.conf << 'EOF'
+[Unit]
+After=systemd-tmpfiles-setup.service
+EOF
 
 ### Preserve Fleet enrollment state across bootc updates
 #

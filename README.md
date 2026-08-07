@@ -234,6 +234,11 @@ Fleet's `fleetctl package` command (the only supported way to produce an install
 
 The package is built without `--fleet-url`/`--enroll-secret`, and `/etc/default/orbit` — the file `orbit.service` reads its configuration from — is deleted unconditionally after installation so this image never ships enrollment details. See [Fleet Enrollment Persistence](#fleet-enrollment-persistence) for why this matters across updates.
 
+`fleet-osquery` installs orbit's files under `/opt/orbit` and `/usr/local/bin`, both of which are symlinked into `/var` on this image. bootc/ostree do not carry arbitrary `/var` content from the container image into a deployed system beyond a genuinely first-ever install (and recent ostree versions dropped that entirely) — `/var` is machine-local state, populated via `systemd-tmpfiles`, not shipped with the image. Without a workaround, `bootc switch` onto this image (the documented, common path) would leave `/opt/orbit` and `/usr/local/bin/orbit` completely empty even though rpm's database lists them as installed. `build.sh` works around this by stashing what the rpm installs under `/usr/lib/fleetd-seed/` (a plain path that *is* committed normally) and shipping a `systemd-tmpfiles.d` snippet (`/usr/lib/tmpfiles.d/fleetd-seed.conf`) that copies it into place through the symlinks on first boot. The tmpfiles `C` directive only acts if its destination doesn't already exist, so this never clobbers orbit's own self-updated binaries later.
+
+> [!NOTE]
+> The Homebrew installation described below relies on the same "`/var` is seeded from the image" assumption that turned out to be false for Fleet's `/opt`/`/usr/local` content. It has not been independently re-verified against a real `bootc switch` deployment since this was discovered, and may have the same gap.
+
 ## /var Runtime Directories
 
 SSSD's cache and runtime socket directories live under `/var`, which bootc never modifies. They are pre-created at build time to avoid race conditions on first boot before `sssd` has initialised them:
