@@ -31,11 +31,71 @@ install -d -m 0711 /var/lib/sss/db
 install -d -m 0755 /var/lib/sss/pipes/private
 install -d -m 0755 /var/log/sssd
 
+### Install Fleet agent (fleetd/orbit)
+#
+# fleetd is Fleet's cross-platform osquery agent (orbit + osqueryd):
+# https://fleetdm.com/docs/using-fleet/orbit
+# https://fleetdm.com/docs/configuration/agent-configuration
+#
+# There is no public dnf/yum repo for it. The only supported way to obtain
+# an installable package is `fleetctl package`, which fetches the orbit and
+# osqueryd binaries from Fleet's TUF update server (tuf.fleetctl.com) and
+# wraps them into an rpm using fpm. Install fpm's build dependencies, grab
+# the latest fleetctl release, and build the rpm WITHOUT --fleet-url or
+# --enroll-secret so no server address or secret is baked into the image.
+
+dnf5 install -y ruby ruby-devel rubygems rpm-build gcc make redhat-rpm-config
+gem install --no-document fpm
+
+_fleet_version="$(curl -fsSL https://api.github.com/repos/fleetdm/fleet/releases/latest |
+    jq -r '.tag_name' | sed 's/^fleet-v//')"
+_fleet_workdir="$(mktemp -d)"
+curl -fsSL \
+    "https://github.com/fleetdm/fleet/releases/download/fleet-v${_fleet_version}/fleetctl_v${_fleet_version}_linux_amd64.tar.gz" \
+    -o "${_fleet_workdir}/fleetctl.tar.gz"
+tar -xzf "${_fleet_workdir}/fleetctl.tar.gz" -C "${_fleet_workdir}"
+install -m 0755 \
+    "${_fleet_workdir}/fleetctl_v${_fleet_version}_linux_amd64/fleetctl" \
+    /usr/local/bin/fleetctl
+
+(cd "${_fleet_workdir}" && fleetctl package --type rpm)
+dnf5 install -y "${_fleet_workdir}"/fleet-osquery*.rpm
+
+### Preserve Fleet enrollment state across bootc updates
+#
+# Same three-way /etc merge concern as FreeIPA above: orbit's runtime
+# configuration (Fleet server URL, enrollment secret path, TLS settings)
+# lives in /etc/default/orbit, which is read via orbit.service's
+# EnvironmentFile directive. Because the package was built without
+# --fleet-url/--enroll-secret, that file should already be free of server
+# details, but strip it unconditionally so this image never ships any
+# content there. An operator enrolls the host later (populating
+# /etc/default/orbit and enabling the service); bootc will treat that as a
+# local addition and never touch it on subsequent updates.
+
+rm -f /etc/default/orbit
+
+# fleetctl and fpm itself are only needed to produce the package and don't
+# need to ship in the final image. Their dnf dependencies (ruby, gcc, make,
+# rpm-build, etc.) are deliberately left installed rather than removed here:
+# some (gcc, make, kernel headers) may already be relied on by the base
+# Bazzite image for akmods/DKMS builds, and `dnf5 remove` cannot distinguish
+# "installed only for this step" from "already required by the base image".
+gem uninstall --no-document -a -x fpm || true
+rm -f /usr/local/bin/fleetctl
+rm -rf "${_fleet_workdir}"
+unset _fleet_version _fleet_workdir
+
 ### Enable required system units
 
 systemctl enable sssd
 systemctl enable oddjobd
 systemctl enable podman.socket
+# orbit will log connection errors until an operator populates
+# /etc/default/orbit with a Fleet server URL and enrollment secret, but
+# enabling it now means it starts enforcing agent configuration as soon as
+# that file is in place, with no extra step required after enrollment.
+systemctl enable orbit || true
 
 ### Fix bootc-image-builder ISO manifest generation compatibility
 #

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Repository Is
 
-A custom [bootc](https://github.com/bootc-dev/bootc) OCI image layered on top of `ghcr.io/ublue-os/bazzite-gnome:stable` (a Universal Blue image), adding FreeIPA client support. Images are built via GitHub Actions and published to `ghcr.io/personalcyber/bazzite-freeipa`. The image is designed so that a FreeIPA domain join survives `bootc` updates via bootc's three-way `/etc` merge.
+A custom [bootc](https://github.com/bootc-dev/bootc) OCI image layered on top of `ghcr.io/ublue-os/bazzite-gnome:stable` (a Universal Blue image), adding FreeIPA client support and the Fleet osquery agent (`fleetd`/`orbit`). Images are built via GitHub Actions and published to `ghcr.io/personalcyber/bazzite-freeipa`. The image is designed so that a FreeIPA domain join and a Fleet enrollment both survive `bootc` updates via bootc's three-way `/etc` merge.
 
 ## Common Commands
 
@@ -31,7 +31,7 @@ just clean                  # Remove build artifacts from output/
 ### Build Pipeline
 
 1. **`Containerfile`** — Two-stage build: a scratch `ctx` stage copies `build_files/` (making scripts available without embedding them in the final layer). The base image is `ghcr.io/ublue-os/bazzite-gnome:stable`. After the main `RUN` step, a `COPY` instruction ships an empty `/etc/hostname` (see Hostname Preservation below). Ends with `bootc container lint`.
-2. **`build_files/build.sh`** — Executed during the container build (`RUN /ctx/build.sh`). Installs `freeipa-client`, `oddjob`, `oddjob-mkhomedir`; creates `/etc/ipa/` and `/etc/sssd/conf.d/` directory skeletons; pre-creates `/var/lib/sss/` and `/var/log/sssd/`; enables `sssd`, `oddjobd`, and `podman.socket`. Runs with `set -ouex pipefail`.
+2. **`build_files/build.sh`** — Executed during the container build (`RUN /ctx/build.sh`). Installs `freeipa-client`, `oddjob`, `oddjob-mkhomedir`; creates `/etc/ipa/` and `/etc/sssd/conf.d/` directory skeletons; pre-creates `/var/lib/sss/` and `/var/log/sssd/`; builds and installs the `fleet-osquery` (`orbit`) rpm via `fleetctl package` (no fleet-url/enroll-secret baked in) and strips `/etc/default/orbit`; enables `sssd`, `oddjobd`, `podman.socket`, and `orbit`. Runs with `set -ouex pipefail`.
 3. **`build_files/hostname`** — Empty file copied to `/etc/hostname` in the image via `COPY`. Must remain empty.
 4. **GitHub Actions (`build.yml`)** — Triggers on push to `main`, PRs, and daily schedule. Builds with `buildah`, pushes to GHCR only on non-PR pushes to the default branch, signs with Cosign using `SIGNING_SECRET`.
 5. **GitHub Actions (`build-disk.yml`)** — Manually triggered workflow producing `qcow2`, `anaconda-iso-gnome`, and `anaconda-iso-kde` disk images from the published OCI image using `bootc-image-builder`. Can optionally upload to S3.
@@ -46,6 +46,10 @@ just clean                  # Remove build artifacts from output/
 ### FreeIPA Join Persistence
 
 bootc performs a three-way `/etc` merge on update: it diffs old-image `/etc` vs new-image `/etc` and applies that delta to local `/etc`. Files written by `ipa-client-install` (`sssd.conf`, `krb5.conf`, `/etc/ipa/default.conf`, etc.) are never shipped in this image, so bootc treats them as local additions and never overwrites them. The `/etc/ipa/` and `/etc/sssd/conf.d/` directories are present in the image as empty skeletons — no config content is shipped inside them.
+
+### Fleet Agent Persistence
+
+Same three-way `/etc` merge strategy, applied to Fleet. There is no public dnf/yum repo for `fleetd`; `build.sh` installs `fpm`'s build dependencies (`ruby`, `ruby-devel`, `rubygems`, `rpm-build`, `gcc`, `make`, `redhat-rpm-config`), downloads the latest `fleetctl` release, and runs `fleetctl package --type rpm` **without** `--fleet-url`/`--enroll-secret` so no server address or secret is baked into the image. `orbit.service` reads its runtime config (Fleet server URL, enrollment secret, TLS settings) from `/etc/default/orbit` via `EnvironmentFile`; `build.sh` deletes that file unconditionally after installing the package so bootc never ships content there. `fleetctl` and the `fpm` gem are removed after the rpm is built and installed; their dnf dependencies (`ruby`, `gcc`, `make`, `rpm-build`, etc.) are deliberately left in place since `dnf5 remove` cannot tell them apart from packages the base Bazzite image already relies on (e.g. `gcc`/`make` for akmods/DKMS). An operator enrolls a host by writing `/etc/default/orbit` locally and restarting `orbit` (already enabled); that file is a local addition from bootc's perspective and survives every subsequent update.
 
 ### Hostname Preservation
 
