@@ -47,16 +47,19 @@ install -d -m 0755 /var/log/sssd
 dnf5 install -y ruby ruby-devel rubygems rpm-build gcc make redhat-rpm-config
 
 # Fedora's rubygems defaults to a per-user install (under $HOME) even when
-# run as root, which would land the gem cache under /root. But /root,
-# /usr/local, /opt, etc. are all symlinked into /var on this ostree-based
-# image (see the /opt note in the Containerfile) and /var isn't populated
-# during this RUN step, so mkdir can't create anything under any of them.
-# Pin GEM_HOME under /tmp (tmpfs-mounted for this RUN step, see
-# Containerfile) to sidestep both problems, and put its bin/ on PATH so
-# `fleetctl package` can find the fpm executable it shells out to.
+# run as root, which would land the gem cache under /root; fleetctl itself
+# also writes a query-history file under $HOME. But /root, /usr/local,
+# /opt, etc. are all symlinked into /var on this ostree-based image (see
+# the /opt note in the Containerfile) and /var isn't populated during this
+# RUN step, so nothing can be created under any of them. Point HOME at a
+# plain directory under /tmp (tmpfs-mounted for this RUN step, see
+# Containerfile) to sidestep that for every tool used below, and pin
+# GEM_HOME there too with its bin/ on PATH so `fleetctl package` can find
+# the fpm executable it shells out to.
+export HOME=/tmp/fleet-build-home
 export GEM_HOME=/tmp/fleet-fpm-gems
 export PATH="${GEM_HOME}/bin:${PATH}"
-mkdir -p "${GEM_HOME}"
+mkdir -p "${HOME}" "${GEM_HOME}"
 gem install --no-document fpm
 
 _fleet_version="$(curl -fsSL https://api.github.com/repos/fleetdm/fleet/releases/latest |
@@ -104,9 +107,9 @@ rm -f /etc/default/orbit
 # some (gcc, make, kernel headers) may already be relied on by the base
 # Bazzite image for akmods/DKMS builds, and `dnf5 remove` cannot distinguish
 # "installed only for this step" from "already required by the base image".
-rm -rf "${GEM_HOME}"
+rm -rf "${GEM_HOME}" "${HOME}"
 rm -rf "${_fleet_workdir}"
-unset _fleet_version _fleet_workdir _fleetctl GEM_HOME
+unset _fleet_version _fleet_workdir _fleetctl GEM_HOME HOME
 
 ### Enable required system units
 
