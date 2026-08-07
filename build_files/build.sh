@@ -47,12 +47,14 @@ install -d -m 0755 /var/log/sssd
 dnf5 install -y ruby ruby-devel rubygems rpm-build gcc make redhat-rpm-config
 
 # Fedora's rubygems defaults to a per-user install (under $HOME) even when
-# run as root, and this base image ships /root as a symlink to /var/roothome
-# (mirroring /home -> /var/home) whose target doesn't exist yet at build
-# time, so mkdir/gem both fail trying to create anything under it. Pin
-# GEM_HOME to a plain directory to sidestep both problems, and put its bin/
-# on PATH so `fleetctl package` can find the fpm executable it shells out to.
-export GEM_HOME=/usr/local/lib/fleet-fpm-gems
+# run as root, which would land the gem cache under /root. But /root,
+# /usr/local, /opt, etc. are all symlinked into /var on this ostree-based
+# image (see the /opt note in the Containerfile) and /var isn't populated
+# during this RUN step, so mkdir can't create anything under any of them.
+# Pin GEM_HOME under /tmp (tmpfs-mounted for this RUN step, see
+# Containerfile) to sidestep both problems, and put its bin/ on PATH so
+# `fleetctl package` can find the fpm executable it shells out to.
+export GEM_HOME=/tmp/fleet-fpm-gems
 export PATH="${GEM_HOME}/bin:${PATH}"
 mkdir -p "${GEM_HOME}"
 gem install --no-document fpm
