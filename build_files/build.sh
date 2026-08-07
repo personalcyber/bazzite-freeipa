@@ -46,10 +46,15 @@ install -d -m 0755 /var/log/sssd
 
 dnf5 install -y ruby ruby-devel rubygems rpm-build gcc make redhat-rpm-config
 
-# rubygems expects its user-level download cache directory to already exist
-# and fails every gem fetch with Errno::ENOENT if it doesn't. It isn't
-# created automatically in this container, so create it up front.
-mkdir -p "$(ruby -e 'puts Gem.user_dir')/cache"
+# Fedora's rubygems defaults to a per-user install (under $HOME) even when
+# run as root, and this base image ships /root as a symlink to /var/roothome
+# (mirroring /home -> /var/home) whose target doesn't exist yet at build
+# time, so mkdir/gem both fail trying to create anything under it. Pin
+# GEM_HOME to a plain directory to sidestep both problems, and put its bin/
+# on PATH so `fleetctl package` can find the fpm executable it shells out to.
+export GEM_HOME=/usr/local/lib/fleet-fpm-gems
+export PATH="${GEM_HOME}/bin:${PATH}"
+mkdir -p "${GEM_HOME}"
 gem install --no-document fpm
 
 _fleet_version="$(curl -fsSL https://api.github.com/repos/fleetdm/fleet/releases/latest |
@@ -86,10 +91,10 @@ rm -f /etc/default/orbit
 # some (gcc, make, kernel headers) may already be relied on by the base
 # Bazzite image for akmods/DKMS builds, and `dnf5 remove` cannot distinguish
 # "installed only for this step" from "already required by the base image".
-gem uninstall --no-document -a -x fpm || true
+rm -rf "${GEM_HOME}"
 rm -f /usr/local/bin/fleetctl
 rm -rf "${_fleet_workdir}"
-unset _fleet_version _fleet_workdir
+unset _fleet_version _fleet_workdir GEM_HOME
 
 ### Enable required system units
 
