@@ -1,0 +1,6 @@
+[Unit]
+Description=Rebuild flatpak_packages inventory table for osquery ATC
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/flatpak-inventory.py
