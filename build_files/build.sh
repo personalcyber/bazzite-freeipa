@@ -82,15 +82,15 @@ chmod 0755 "${_fleetctl}"
 # step.
 (cd "${_fleet_workdir}" && "${_fleetctl}" package --type rpm)
 
-# fleet-osquery actually installs orbit to /usr/local/bin (not /opt/orbit),
-# and /usr/local is symlinked to /var/usrlocal in this image (same ostree
-# convention as /opt -> /var/opt, documented in the Containerfile) with
-# /var unpopulated during this RUN step. Pre-create the real backing
-# directory so dnf5 can write through the symlink — the same workaround
-# used for Homebrew's /var/home/linuxbrew below. Unlike the fleetctl/fpm
-# build tooling earlier in this section, these contents are meant to ship
-# in the image.
-mkdir -p /var/usrlocal
+# fleet-osquery writes orbit's TUF-managed binary tree under /opt/orbit AND
+# a launcher under /usr/local/bin. Both /opt and /usr/local are symlinked
+# into /var in this image (see the [IM]MUTABLE /opt note in the
+# Containerfile) with /var unpopulated during this RUN step. Pre-create
+# both real backing directories so dnf5 can write through the symlinks —
+# the same workaround used for Homebrew's /var/home/linuxbrew below.
+# Unlike the fleetctl/fpm build tooling earlier in this section, these
+# contents are meant to ship in the image.
+mkdir -p /var/opt /var/usrlocal
 dnf5 install -y "${_fleet_workdir}"/fleet-osquery*.rpm
 
 ### Preserve Fleet enrollment state across bootc updates
