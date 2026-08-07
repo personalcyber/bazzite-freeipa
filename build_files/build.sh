@@ -91,7 +91,13 @@ chmod 0755 "${_fleetctl}"
 # Unlike the fleetctl/fpm build tooling earlier in this section, these
 # contents are meant to ship in the image.
 mkdir -p /var/opt /var/usrlocal
-dnf5 install -y "${_fleet_workdir}"/fleet-osquery*.rpm
+
+# fpm-generated postinstall scriptlets (%post/%posttrans) call systemctl in
+# ways that fail hard in this scriptless buildah container (no systemd
+# PID 1), unlike the tolerant %systemd_post macros freeipa's packages use
+# above. Skip scriptlets entirely — we enable orbit.service ourselves
+# below regardless of whatever the package's postinstall would have done.
+dnf5 install -y --setopt=tsflags=noscripts "${_fleet_workdir}"/fleet-osquery*.rpm
 
 ### Preserve Fleet enrollment state across bootc updates
 #
