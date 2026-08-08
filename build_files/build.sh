@@ -31,6 +31,37 @@ install -d -m 0711 /var/lib/sss/db
 install -d -m 0755 /var/lib/sss/pipes/private
 install -d -m 0755 /var/log/sssd
 
+### Work around Intel Tiger Lake audio not being recognized
+#
+# On several Tiger Lake (TGL) platforms, the kernel's default SOF (Sound
+# Open Firmware) driver stack fails to bring up the onboard/HDMI audio
+# codec at all -- no PCM devices show up, or only a "dummy output" does.
+# The documented workaround is to force the legacy snd_hda_intel driver
+# instead of SOF, via the snd-intel-dspcfg module's dsp_driver option:
+# https://github.com/tirsasaki/Fix-Intel-Tiger-Lake-Audio-Disable-SOF-on-EndeavourOS-Arch-Linux
+#
+# Ship this under /usr/lib/modprobe.d rather than /etc/modprobe.d: modprobe
+# reads /etc, then /run, then /usr/lib (first match for a given option set
+# wins), so /usr/lib/modprobe.d is the correct "image-owned default" location
+# -- it's part of this image like any other file under /usr, and a user who
+# needs a different value can still override it locally under /etc without
+# fighting bootc's /etc merge. Unlike the FreeIPA/Fleet config above, there's
+# no reason to keep this out of the image: nothing else is expected to own
+# or generate this file.
+#
+# dsp_driver=1 selects the legacy HDA driver. Audio modules aren't pulled
+# into the initramfs on this image (no early-boot dependency on sound), so
+# no dracut/initramfs regeneration is required for the option to take
+# effect -- it applies the next time the affected modules are loaded.
+
+install -d -m 0755 /usr/lib/modprobe.d
+cat > /usr/lib/modprobe.d/intel-audio-tigerlake.conf << 'EOF'
+# Force the legacy snd_hda_intel driver instead of SOF on Intel Tiger Lake
+# platforms, where SOF fails to bring up onboard/HDMI audio at all. See
+# build.sh for details.
+options snd-intel-dspcfg dsp_driver=1
+EOF
+
 ### Install Fleet agent (fleetd/orbit)
 #
 # fleetd is Fleet's cross-platform osquery agent (orbit + osqueryd):
