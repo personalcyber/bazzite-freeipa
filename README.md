@@ -154,6 +154,29 @@ The same three-way `/etc` merge logic protects Fleet enrollment. `orbit.service`
 
 ---
 
+# Flatpak Software Inventory in Fleet
+
+osquery has no native `flatpak_packages` table (unlike `deb_packages`/`rpm_packages`), so Fleet's Software inventory can't see installed Flatpak apps out of the box — a real gap on an image where Flatpak/Flathub is a first-class app delivery mechanism.
+
+This image ships a `flatpak-inventory.timer` (enabled by default, runs every 15 minutes starting 5 minutes after boot) that rebuilds a `flatpak_packages` table in a plain SQLite database at `/var/lib/flatpak-inventory/flatpak.db`, using osquery's [Automatic Table Construction (ATC)](https://osquery.readthedocs.io/en/stable/deployment/config-server/#automatic-table-construction) to expose it as a normal queryable table. Only the system-wide Flatpak installation (`/var/lib/flatpak`) is covered, since the timer runs as root; per-user installs under `~/.local/share/flatpak` are not enumerated.
+
+The database is inert on its own — it needs a Fleet-side `agent_options` entry to actually become queryable (this lives in your Fleet server's config, not something this image can ship):
+
+```yaml
+config:
+  options:
+    # ... existing options ...
+  auto_table_construction:
+    flatpak_packages:
+      query: "SELECT application, version, branch, origin, ref, installation FROM flatpak_packages"
+      path: "/var/lib/flatpak-inventory/flatpak.db"
+      columns: ["application", "version", "branch", "origin", "ref", "installation"]
+```
+
+Once that's configured, `SELECT * FROM flatpak_packages;` works as a live or scheduled query, same as any built-in package table. It won't show on the Host Details Software tab, since that view only aggregates the known built-in package tables, but it's fully queryable/exportable through Fleet's log pipeline.
+
+---
+
 # Changes to the Base Bazzite Image
 
 This image is built on top of `ghcr.io/ublue-os/bazzite-gnome:stable` and makes the following deliberate modifications to support FreeIPA client functionality and ensure join state survives `bootc` updates.
@@ -175,6 +198,7 @@ This image is built on top of `ghcr.io/ublue-os/bazzite-gnome:stable` and makes 
 | `oddjobd` | D-Bus daemon for `oddjob`. Must be running for `pam_oddjob_mkhomedir` to create home directories at login. |
 | `podman.socket` | Inherited from the Bazzite base; retained for rootless container support. |
 | `orbit` | Fleet's agent manager. Enabled unconfigured; it logs connection errors until `/etc/default/orbit` is populated (see [Setting Up the Fleet Agent](#setting-up-the-fleet-agent)), after which it starts enforcing agent configuration with no extra step required. |
+| `flatpak-inventory.timer` | Runs `flatpak-inventory.py` every 15 minutes (starting 5 minutes after boot) to rebuild the `flatpak_packages` SQLite table Fleet's osquery ATC config reads. See [Flatpak Software Inventory in Fleet](#flatpak-software-inventory-in-fleet). |
 
 ## Homebrew
 
@@ -238,6 +262,12 @@ The package is built without `--fleet-url`/`--enroll-secret`, and `/etc/default/
 
 > [!NOTE]
 > The Homebrew installation described below relies on the same "`/var` is seeded from the image" assumption that turned out to be false for Fleet's `/opt`/`/usr/local` content. It has not been independently re-verified against a real `bootc switch` deployment since this was discovered, and may have the same gap.
+
+## Flatpak Inventory Script
+
+`flatpak-inventory.py` is installed to `/usr/libexec/flatpak-inventory.py` and run periodically by `flatpak-inventory.timer`. It shells out to `flatpak list --app --columns=application,version,branch,origin,ref,installation` — the `--columns` form gives stable, script-friendly tab-separated output with no header, unlike the default human-oriented table — and rebuilds (`DROP`+`CREATE`, so removed apps disappear) a `flatpak_packages` table in a SQLite database at `/var/lib/flatpak-inventory/flatpak.db`.
+
+Unlike orbit's `/opt` payload above, this database only ever exists at runtime — the script creates its own database directory (`os.makedirs`) the first time it runs — so there's no build-time `/var` content that needs `tmpfiles.d` seeding here; the class of bug fixed for Fleet's `/opt`/`/usr/local` files doesn't apply.
 
 ## /var Runtime Directories
 

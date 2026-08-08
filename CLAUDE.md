@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Repository Is
 
-A custom [bootc](https://github.com/bootc-dev/bootc) OCI image layered on top of `ghcr.io/ublue-os/bazzite-gnome:stable` (a Universal Blue image), adding FreeIPA client support and the Fleet osquery agent (`fleetd`/`orbit`). Images are built via GitHub Actions and published to `ghcr.io/personalcyber/bazzite-freeipa`. The image is designed so that a FreeIPA domain join and a Fleet enrollment both survive `bootc` updates via bootc's three-way `/etc` merge.
+A custom [bootc](https://github.com/bootc-dev/bootc) OCI image layered on top of `ghcr.io/ublue-os/bazzite-gnome:stable` (a Universal Blue image), adding FreeIPA client support and the Fleet osquery agent (`fleetd`/`orbit`), including a Flatpak software inventory table for Fleet via osquery's Automatic Table Construction. Images are built via GitHub Actions and published to `ghcr.io/personalcyber/bazzite-freeipa`. The image is designed so that a FreeIPA domain join and a Fleet enrollment both survive `bootc` updates via bootc's three-way `/etc` merge.
 
 ## Common Commands
 
@@ -31,10 +31,11 @@ just clean                  # Remove build artifacts from output/
 ### Build Pipeline
 
 1. **`Containerfile`** — Two-stage build: a scratch `ctx` stage copies `build_files/` (making scripts available without embedding them in the final layer). The base image is `ghcr.io/ublue-os/bazzite-gnome:stable`. After the main `RUN` step, a `COPY` instruction ships an empty `/etc/hostname` (see Hostname Preservation below). Ends with `bootc container lint`.
-2. **`build_files/build.sh`** — Executed during the container build (`RUN /ctx/build.sh`). Installs `freeipa-client`, `oddjob`, `oddjob-mkhomedir`; creates `/etc/ipa/` and `/etc/sssd/conf.d/` directory skeletons; pre-creates `/var/lib/sss/` and `/var/log/sssd/`; builds and installs the `fleet-osquery` (`orbit`) rpm via `fleetctl package` (no fleet-url/enroll-secret baked in) and strips `/etc/default/orbit`; enables `sssd`, `oddjobd`, `podman.socket`, and `orbit`. Runs with `set -ouex pipefail`.
+2. **`build_files/build.sh`** — Executed during the container build (`RUN /ctx/build.sh`). Installs `freeipa-client`, `oddjob`, `oddjob-mkhomedir`; creates `/etc/ipa/` and `/etc/sssd/conf.d/` directory skeletons; pre-creates `/var/lib/sss/` and `/var/log/sssd/`; builds and installs the `fleet-osquery` (`orbit`) rpm via `fleetctl package` (no fleet-url/enroll-secret baked in) and strips `/etc/default/orbit`; installs `flatpak-inventory.py` and its timer/service units; enables `sssd`, `oddjobd`, `podman.socket`, `orbit`, and `flatpak-inventory.timer`. Runs with `set -ouex pipefail`.
 3. **`build_files/hostname`** — Empty file copied to `/etc/hostname` in the image via `COPY`. Must remain empty.
-4. **GitHub Actions (`build.yml`)** — Triggers on push to `main`, PRs, and daily schedule. Builds with `buildah`, pushes to GHCR only on non-PR pushes to the default branch, signs with Cosign using `SIGNING_SECRET`.
-5. **GitHub Actions (`build-disk.yml`)** — Manually triggered workflow producing `qcow2`, `anaconda-iso-gnome`, and `anaconda-iso-kde` disk images from the published OCI image using `bootc-image-builder`. Can optionally upload to S3.
+4. **`build_files/flatpak-inventory.py`, `.service`, `.timer`** — osquery Automatic Table Construction (ATC) source for Flatpak inventory; see "Flatpak Inventory for Fleet" below.
+5. **GitHub Actions (`build.yml`)** — Triggers on push to `main`, PRs, and daily schedule. Builds with `buildah`, pushes to GHCR only on non-PR pushes to the default branch, signs with Cosign using `SIGNING_SECRET`.
+6. **GitHub Actions (`build-disk.yml`)** — Manually triggered workflow producing `qcow2`, `anaconda-iso-gnome`, and `anaconda-iso-kde` disk images from the published OCI image using `bootc-image-builder`. Can optionally upload to S3.
 
 ### Key Files to Modify
 
@@ -56,6 +57,12 @@ Same three-way `/etc` merge strategy, applied to Fleet. There is no public dnf/y
 ### Intel Tiger Lake Audio Fix
 
 Tiger Lake (TGL) platforms can fail to bring up onboard/HDMI audio at all under the kernel's default SOF (Sound Open Firmware) driver stack (no PCM devices, or only a "dummy output"). `build.sh` ships `/usr/lib/modprobe.d/intel-audio-tigerlake.conf` with `options snd-intel-dspcfg dsp_driver=1`, forcing the legacy `snd_hda_intel` driver instead of SOF. It's placed under `/usr/lib/modprobe.d` rather than `/etc/modprobe.d` — modprobe checks `/etc`, then `/run`, then `/usr/lib`, so `/usr/lib` is the correct "image-owned default" location; it ships with the image like any other `/usr` file (no `/etc`-merge concern here, unlike the FreeIPA/Fleet config above), while still leaving a local `/etc/modprobe.d` override available to a user who needs a different value. No initramfs regeneration is required since audio modules aren't pulled into this image's initramfs.
+
+### Flatpak Inventory for Fleet
+
+osquery has no native `flatpak_packages` table, so Fleet's Software inventory can't see installed Flatpak apps by default — a real gap on an image where Flatpak/Flathub is a first-class app delivery mechanism. `build_files/flatpak-inventory.py` runs `flatpak list --app --columns=application,version,branch,origin,ref,installation` (the `--columns` form gives stable, tab-separated output with no header) and rebuilds (`DROP`+`CREATE`) a `flatpak_packages` table in a SQLite database at `/var/lib/flatpak-inventory/flatpak.db`, which osquery's [Automatic Table Construction (ATC)](https://osquery.readthedocs.io/en/stable/deployment/config-server/#automatic-table-construction) can expose as a normal queryable table given a matching `auto_table_construction` entry in Fleet's `agent_options` (server-side config, not shipped by this image — see README.md). `flatpak-inventory.timer`/`.service` (enabled by default) run the script every 15 minutes, starting 5 minutes after boot. Only the system-wide Flatpak installation is covered, since the timer runs as root.
+
+Unlike orbit's `/opt` payload, there is no build-time `/var` content to seed here: the script creates its own database directory (`os.makedirs`) at runtime, so the class of bug fixed above for `/opt`/`/usr/local` doesn't apply.
 
 ### Hostname Preservation
 
