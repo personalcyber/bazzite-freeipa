@@ -174,6 +174,27 @@ unset _fleet_version _fleet_workdir _fleetctl GEM_HOME
 # step" apart from "already required by the base image".
 dnf5 remove -y ruby ruby-devel rubygems rpm-build || true
 
+### Flatpak inventory for osquery Automatic Table Construction (ATC)
+#
+# osquery has no native flatpak_packages table (unlike deb_packages /
+# rpm_packages), so Fleet's Software inventory can't see installed
+# Flatpak apps -- a real gap on an image where Flatpak/Flathub is a
+# first-class app delivery mechanism. flatpak-inventory.py rebuilds a
+# flatpak_packages table in a plain SQLite database that osquery's ATC
+# feature can expose as a normal queryable table; see the
+# auto_table_construction snippet in README.md for the Fleet-side config
+# needed to actually wire it up. Unlike orbit's /opt payload above, the
+# database only ever exists at runtime (the script creates its own
+# directory), so there's no build-time /var content requiring tmpfiles.d
+# seeding here.
+
+install -d -m 0755 /usr/libexec
+install -m 0755 /ctx/flatpak-inventory.py /usr/libexec/flatpak-inventory.py
+install -m 0644 /ctx/flatpak-inventory.service \
+    /usr/lib/systemd/system/flatpak-inventory.service
+install -m 0644 /ctx/flatpak-inventory.timer \
+    /usr/lib/systemd/system/flatpak-inventory.timer
+
 ### Enable required system units
 
 systemctl enable sssd
@@ -184,6 +205,7 @@ systemctl enable podman.socket
 # enabling it now means it starts enforcing agent configuration as soon as
 # that file is in place, with no extra step required after enrollment.
 systemctl enable orbit || true
+systemctl enable flatpak-inventory.timer
 
 ### Fix bootc-image-builder ISO manifest generation compatibility
 #

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically rebuild flatpak_packages inventory table for osquery ATC
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
